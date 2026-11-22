@@ -1,0 +1,72 @@
+# Checks every push and pull request on every supported system (checks.yml, the same checks a
+# release has to pass).
+# Pushes to main (and a start by hand) then build the installers and keep them for 14 days as
+# artifacts of the run. Releases for a version tag: release.yml.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push to the same branch makes the running check obsolete
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Checks
+    uses: ./.github/workflows/checks.yml
+
+  # The installers of the checked state, as in a release but without one: downloadable from the
+  # summary page of the run ("Artifacts"). Not for pull requests, which only need the checks.
+  bundle:
+    name: Bundle (${{ matrix.name }})
+    needs: checks
+    if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+          - name: Linux
+            os: ubuntu-22.04
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Linux system libraries
+        if: runner.os == 'Linux'
+        run: sh scripts/linux/install-build-deps.sh
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      # bundle.targets "all": NSIS + MSI on Windows, deb + rpm + AppImage on Linux
+      - name: Build installers
+        run: npm run tauri build
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Gilgamesh-${{ matrix.name }}-${{ github.sha }}
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/rpm/*.rpm
+            src-tauri/target/release/bundle/appimage/*.AppImage
+          if-no-files-found: error
+          retention-days: 14

@@ -1,0 +1,259 @@
+/* Design tokens and global base styles. Components use only these variables. */
+
+:root {
+  color-scheme: light;
+
+  /* Signature color. The app's frame (title bar, status bar, File navigation)
+     is filled with --accent and --on-accent text. On panels, text, icons,
+     lines and focus rings use --accent-strong, and so do controls that must
+     stand out (primary buttons), with --on-accent-strong text; in dark mode
+     these turn light, while the frame stays dark. */
+  --accent: #20201f;
+  --accent-hover: #353534;
+  --accent-strong: #20201f;
+  --accent-strong-hover: #353534;
+  --on-accent-strong: #ffffff;
+  --on-accent: #ffffff;
+  --on-accent-muted: rgb(255 255 255 / 0.78);
+  --on-accent-hover: rgb(255 255 255 / 0.12);
+
+  /* Neutrals, untinted like the signature color */
+  --text: #1f1f1f;
+  --text-muted: #616161;
+  --surface: #ffffff;
+  --surface-2: #f5f5f4;
+  --canvas: #e5e5e3;
+  --paper: #ffffff;
+  --border: #d6d6d3;
+  --hover: #f0f0ef;
+  --pressed: #e2e2e0;
+  /* Translucent, so the editor's selection (drawn below the text) stays visible. */
+  --line-highlight: rgb(32 32 31 / 0.045);
+  /* Behind a ribbon function and the scope it acts on, which it ties together. */
+  --scope-group: rgb(32 32 31 / 0.055);
+  --selection: rgb(32 32 31 / 0.2);
+
+  /* Status */
+  --error: #c42b1c;
+  --error-bg: #fde7e9;
+  --warning: #b8860b;
+  --success: #107c10;
+  --on-status: #ffffff;
+
+  /* LaTeX in the editor (see latex-editor.ts) */
+  --syn-command: #117711;
+  --syn-keyword: #770088;
+  --syn-comment: #994400;
+  --syn-atom: #221199;
+  --syn-number: #116644;
+  --syn-special: #225566;
+  --syn-bracket: #5f5f5c;
+  --syn-invalid: #dd0000;
+
+  /* Typography */
+  --font-ui: "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Cascadia Code", Consolas, "JetBrains Mono", monospace;
+  --font-xs: 11px;
+  --font-sm: 12px;
+  --font-md: 13px;
+  --font-base: 14px;
+  --font-lg: 20px;
+
+  /* Spacing */
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 12px;
+  --space-6: 16px;
+  --space-7: 24px;
+  --space-8: 40px;
+
+  /* Shape */
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
+  --radius-pill: 999px;
+  --shadow-page: 0 1px 4px rgb(0 0 0 / 0.25);
+
+  /* Text pointer drawn by the app. Windows' own I-beam inverts the background,
+     and WebView2 sometimes draws it plain white for seconds after it was hidden
+     while typing, which makes it invisible on white surfaces. This one has a
+     fixed color (dark here, light in dark mode). Only the I-beam and the
+     resize pointer are replaced: the other pointers have fixed colors and
+     follow the user's Windows settings (size, color). */
+  --cursor-text: image-set(url("/cursors/text.svg") 1x, url("/cursors/text@2x.svg") 2x) 8 12, text;
+  /* Over the explorer's width grip; dark like the I-beam instead of Windows' white. */
+  --cursor-col-resize: image-set(url("/cursors/col-resize.svg") 1x, url("/cursors/col-resize@2x.svg") 2x) 12 12, col-resize;
+
+  /* Layout */
+  --tabbar-height: 34px;
+  --ribbon-height: 88px;
+  --toolbar-height: 30px;
+  --statusbar-height: 24px;
+
+  font-family: var(--font-ui);
+  font-size: var(--font-base);
+  color: var(--text);
+}
+
+/* Dark mode (Settings › Appearance; see theme.svelte.ts). Greys from the
+   signature color #20201f: the title bar keeps it, panels and the editor are
+   a step or two lighter so they stand off it, the canvas behind the PDF a step
+   darker. PDF pages stay white: they show what gets printed. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --accent: #20201f;
+  --accent-hover: #353534;
+  /* Icons and accents on dark panels: light, as the dark one is on light panels. */
+  --accent-strong: #ecebe8;
+  --accent-strong-hover: #d4d3cf;
+  --on-accent-strong: #20201f;
+  --on-accent: #ffffff;
+  --on-accent-muted: rgb(255 255 255 / 0.72);
+  --on-accent-hover: rgb(255 255 255 / 0.1);
+
+  --text: #e8e8e5;
+  --text-muted: #a2a29e;
+  --surface: #262625;
+  --surface-2: #2e2e2d;
+  --canvas: #1a1a19;
+  --paper: #ffffff;
+  --border: #40403e;
+  --hover: #373736;
+  --pressed: #434341;
+  --line-highlight: rgb(255 255 255 / 0.04);
+  --scope-group: rgb(255 255 255 / 0.06);
+  --selection: rgb(236 235 232 / 0.2);
+
+  --error: #f0705f;
+  --error-bg: #3d211e;
+  --warning: #e3b341;
+  --success: #3f9b3f;
+  --on-status: #ffffff;
+
+  --syn-command: #7cc792;
+  --syn-keyword: #d28fd8;
+  --syn-comment: #b8946a;
+  --syn-atom: #8fb2f5;
+  --syn-number: #7fcfb3;
+  --syn-special: #74bcd8;
+  --syn-bracket: #a2a29e;
+  --syn-invalid: #ff7070;
+
+  --shadow-page: 0 1px 6px rgb(0 0 0 / 0.6);
+
+  /* The I-beam and the resize pointer light, so they show on dark surfaces. */
+  --cursor-text: image-set(url("/cursors/text-light.svg") 1x, url("/cursors/text-light@2x.svg") 2x) 8 12, text;
+  --cursor-col-resize: image-set(url("/cursors/col-resize-light.svg") 1x, url("/cursors/col-resize-light@2x.svg") 2x) 12 12, col-resize;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+/* Pinching on a touchscreen would zoom the whole window: the webview lets pinches through for the touchpad (see `pinch.rs`). */
+html {
+  touch-action: pan-x pan-y;
+}
+
+/* Pointers: only the arrow and, over text that can be edited, the I-beam.
+   No hand over buttons and links, no resize or grab pointers (except over
+   the explorer's width grip); this also covers styles of libraries such as
+   CodeMirror's completion list. */
+
+*,
+*::before,
+*::after {
+  cursor: default !important;
+}
+
+input[type="search"],
+input[type="text"],
+.cm-textfield,
+textarea,
+[contenteditable="true"],
+[contenteditable="true"] *,
+.cm-content,
+.cm-content * {
+  cursor: var(--cursor-text) !important;
+}
+
+/* The accept/reject bar of an AI review sits inside the editor text but is no text. */
+.cm-content .cm-ai-controls,
+.cm-content .cm-ai-controls * {
+  cursor: default !important;
+}
+
+/* Form controls */
+
+select,
+input[type="search"],
+input[type="text"] {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--accent-strong);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 1px;
+}
+
+/*
+ * A text field in focus shows it by its own border, without the ring around it
+ * as well. As weak as the ring's rule, so the components' own borders (an
+ * invalid search in red) still win.
+ */
+:where(input:not([type="checkbox"], [type="radio"], [type="file"], [type="range"]), textarea, select):focus-visible {
+  outline: none;
+  border-color: var(--accent-strong);
+}
+
+kbd {
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-family: inherit;
+  font-size: var(--font-xs);
+}
+
+code {
+  font-family: var(--font-mono);
+}
+
+/* Utilities */
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.icon-error {
+  color: var(--error);
+  flex-shrink: 0;
+}
+
+.icon-warning {
+  color: var(--warning);
+  flex-shrink: 0;
+}

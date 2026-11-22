@@ -1,0 +1,109 @@
+# Builds the installers of every supported system for a version tag (v1.2.3) and publishes them as
+# a release on GitHub, where installed copies find the new version (latest.json). Tagging is the
+# deliberate step; everything after it runs by itself.
+#
+#   Windows: NSIS installer (.exe) and .msi
+#   Linux:   .deb (Debian, Ubuntu), .rpm (Fedora, openSUSE) and .AppImage (any distribution)
+#
+# Nothing is built unless the tagged commit is sound: first the tag has to match the version in
+# src-tauri/tauri.conf.json, package.json and Cargo.toml, then the checks of checks.yml have to pass
+# on every system, the same ones as in ci.yml.
+# The builds fill a draft; only when every one of them succeeded is it published, so users never
+# see a release that lacks the installers of their system.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    name: Tag matches the version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - name: Compare
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          app=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          npm=$(node -p "require('./package.json').version")
+          cargo=$(sed -n 's/^version = "\(.*\)"$/\1/p' src-tauri/Cargo.toml | head -n 1)
+          echo "Tag: $tag · tauri.conf.json: $app · package.json: $npm · Cargo.toml: $cargo"
+          if [ "$tag" != "$app" ] || [ "$tag" != "$npm" ] || [ "$tag" != "$cargo" ]; then
+            echo "::error::Tag v$tag does not match the version in every file (tauri.conf.json, package.json, Cargo.toml)"
+            exit 1
+          fi
+
+  checks:
+    name: Checks
+    needs: version
+    uses: ./.github/workflows/checks.yml
+
+  build:
+    name: Build (${{ matrix.name }})
+    needs: checks
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+          - name: Linux
+            # Built on the oldest supported base, so the packages run on newer systems too
+            os: ubuntu-22.04
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Linux system libraries
+        if: runner.os == 'Linux'
+        run: sh scripts/linux/install-build-deps.sh
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      # Builds with tauri.conf.json (bundle.targets "all") and uploads the installers to the draft.
+      # tauri.updater.conf.json adds the updater artifacts: every installer signed with the private
+      # key of the secrets, and latest.json, which installed copies read to find the new version
+      # (src-tauri/src/updates.rs). Only here: CI and local builds need no key.
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: v__VERSION__
+          releaseName: Gilgamesh v__VERSION__
+          # A draft until every build is done (publish below)
+          releaseDraft: true
+          prerelease: false
+          args: --config src-tauri/tauri.updater.conf.json
+          # Windows copies update with the NSIS installer
+          updaterJsonPreferNsis: true
+
+  # Every system built its installers into the draft: now it goes public as the latest release
+  publish:
+    name: Publish the release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --latest

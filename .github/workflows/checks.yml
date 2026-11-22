@@ -1,0 +1,72 @@
+# The checks of a commit on every supported system: the frontend type-checks, passes its tests,
+# is formatted and builds, and the backend is formatted, lint-free and passes its tests.
+# Not started by itself, only called by the other workflows, so both check the same way:
+#
+#   ci.yml       every push to main and every pull request
+#   release.yml  a version tag: the installers are only built once these pass
+name: Checks
+
+on:
+  workflow_call:
+
+# Checking only reads the repository (also when called by release.yml, which may write)
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+          - name: Linux
+            # The oldest supported base (WebKitGTK 4.1): what builds here runs on newer systems too
+            os: ubuntu-22.04
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Linux system libraries
+        if: runner.os == 'Linux'
+        run: sh scripts/linux/install-build-deps.sh
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+      # TypeScript and Svelte types (svelte-check)
+      - run: npm run check
+      # The frontend's logic (Vitest)
+      - run: npm test
+      # Prettier. Only once: formatting is the same on every system, and Git checks the files out
+      # with CRLF on Windows, which Prettier (LF) would report for every file
+      - name: Prettier
+        if: runner.os == 'Linux'
+        run: npm run format:check
+      # Tauri embeds the frontend while compiling, so it has to exist first
+      - run: npm run build
+
+      - name: Format
+        run: cargo fmt --check
+        working-directory: src-tauri
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+        working-directory: src-tauri
+
+      - name: Tests
+        run: cargo test
+        working-directory: src-tauri

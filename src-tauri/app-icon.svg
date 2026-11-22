@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- The app icon wherever Windows shows it (exe, shortcuts, Start menu, taskbar, installer):
+       the cuneiform sign DINGIR (𒀭), which opens the name, white on a rounded tile in the signature
+       colour (the accent colour in app.css), so it stands out on light and dark backgrounds alike.
+       The plain sign without the tile is only drawn inside the app, on its title bar (Ribbon.svelte).
+       After a change, rebuild the files in icons/ with "npm run icon" (app-icon.mjs). -->
+  <defs>
+    <!-- One stylus wedge, head up: triangular head, stem tapering down past the centre. -->
+    <path id="wedge" d="M-110,-420 L110,-420 L40,-290 Q30,60 22,400 L-22,400 Q-30,60 -40,-290 Z"/>
+  </defs>
+
+  <rect width="1024" height="1024" rx="216" fill="#20201f"/>
+
+  <!-- Four crossing wedges: vertical head up, horizontal head left, the two diagonals heads left.
+       Shifted down-right of the centre: all heads sit top/left, this balances the sign optically. -->
+  <g transform="translate(535 535) scale(0.92)" fill="#ffffff">
+    <use href="#wedge"/>
+    <use href="#wedge" transform="rotate(-90)"/>
+    <use href="#wedge" transform="rotate(-45) scale(0.86)"/>
+    <use href="#wedge" transform="rotate(-135) scale(0.86)"/>
+  </g>
+</svg>
