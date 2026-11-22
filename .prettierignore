@@ -7,4 +7,6 @@ src/lib/latex/symbol-table.ts
 src-tauri/
 static/
 package-lock.json
-project.inlang/cache/
+# Inlang writes everything but settings.json itself (see project.inlang/.gitignore).
+project.inlang/*
+!project.inlang/settings.json

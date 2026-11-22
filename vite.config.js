@@ -2,21 +2,15 @@ import { defineConfig } from "vite";
 import { sveltekit } from "@sveltejs/kit/vite";
 import { paraglideVitePlugin } from "@inlang/paraglide-js";
 import process from "node:process";
+import { PARAGLIDE } from "./scripts/paraglide.mjs";
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
 export default defineConfig(() => ({
   plugins: [
     sveltekit(),
-    paraglideVitePlugin({
-      project: "./project.inlang",
-      outdir: "./src/lib/paraglide",
-      // The app replaces getLocale (see locale.svelte.ts) and keeps the choice in settings.json;
-      // this only matters as a fallback.
-      strategy: ["preferredLanguage", "baseLocale"],
-      // Single-user webview, so no per-request isolation (which pulls in node:async_hooks) is needed.
-      disableAsyncLocalStorage: true,
-    }),
+    // The same options as the tests and `npm run check` (scripts/paraglide.mjs).
+    paraglideVitePlugin(PARAGLIDE),
   ],
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`

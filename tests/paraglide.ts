@@ -1,10 +1,9 @@
 // Compiles the messages for the tests where no dev server or build has done
-// so yet (a fresh checkout). Left alone otherwise: rewriting them would
-// reload a running `tauri dev`.
-import { existsSync } from "node:fs";
-import { compile } from "@inlang/paraglide-js";
+// so yet (a fresh checkout) or they are out of date, with the app's options
+// (scripts/paraglide.mjs). Left alone otherwise: rewriting them would reload
+// a running `tauri dev`.
+import { compileParaglide } from "../scripts/paraglide.mjs";
 
 export default async function setup() {
-  if (existsSync("src/lib/paraglide/messages.js")) return;
-  await compile({ project: "./project.inlang", outdir: "./src/lib/paraglide" });
+  await compileParaglide();
 }
