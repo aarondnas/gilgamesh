@@ -18,7 +18,8 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use notify::event::ModifyKind;
+use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc;
@@ -107,7 +108,7 @@ impl ProjectWatch {
         projects.remove(label);
         let Some(events) = self.events.get().cloned() else { return };
         let watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-            if let Ok(event) = event {
+            if let Some(event) = event.ok().filter(|event| alters(&event.kind)) {
                 for path in event.paths {
                     let _ = events.send(path);
                 }
@@ -192,6 +193,13 @@ impl ProjectWatch {
     }
 }
 
+/// Whether an event can change what the project holds. Linux (inotify) also reports
+/// files being read and their times changing; every build reads the project, so
+/// counted as changes they would start the next build, and that one the next, forever.
+fn alters(kind: &EventKind) -> bool {
+    !matches!(kind, EventKind::Access(_) | EventKind::Modify(ModifyKind::Metadata(_)))
+}
+
 fn is_text(path: &str) -> bool {
     Path::new(path).extension().is_some_and(|ext| TEXT_EXTENSIONS.iter().any(|t| ext.eq_ignore_ascii_case(t)))
 }
@@ -249,6 +257,20 @@ mod tests {
 
     use super::*;
     use crate::util::fs::TestDir;
+    use notify::event::{AccessKind, AccessMode, CreateKind, DataChange, MetadataKind, RemoveKind, RenameMode};
+
+    #[test]
+    fn reading_the_project_is_no_change() {
+        assert!(!alters(&EventKind::Access(AccessKind::Close(AccessMode::Read))));
+        assert!(!alters(&EventKind::Access(AccessKind::Open(AccessMode::Any))));
+        assert!(!alters(&EventKind::Modify(ModifyKind::Metadata(MetadataKind::AccessTime))));
+        assert!(alters(&EventKind::Modify(ModifyKind::Data(DataChange::Content))));
+        assert!(alters(&EventKind::Modify(ModifyKind::Name(RenameMode::Both))));
+        assert!(alters(&EventKind::Create(CreateKind::File)));
+        assert!(alters(&EventKind::Remove(RemoveKind::Folder)));
+        // Windows reports writes without saying what changed.
+        assert!(alters(&EventKind::Modify(ModifyKind::Any)));
+    }
 
     #[test]
     fn reads_text_files_and_skips_hidden_ones() {

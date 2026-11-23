@@ -269,6 +269,9 @@ const HARMLESS_WARNINGS: &[&str] = &[
     // TeX Live has no German (or most other) datatool modules; glossaries
     // loads datatool internally and sorts correctly without it.
     "support for dialect",
+    // babel-french (v4.1, TeX Live 2026) in every French document without
+    // \DocumentMetadata: only a hint that new list templates exist.
+    "You are relying on the legacy list code",
 ];
 
 fn is_harmless(message: &str) -> bool {
@@ -565,6 +568,9 @@ LaTeX Warning: There were undefined references.
     #[test]
     fn hides_harmless_warnings() {
         let log = "Package tracklang Warning: No `datatool' support for dialect `ngerman'  on input line 9924.\n\
+                   Package french.ldf Warning: You are relying on the legacy list code.\n\
+                   (french.ldf)                There is nothing wrong with this, just be aware\n\
+                   (french.ldf)                Reported on input line 4.\n\
                    LaTeX Warning: Reference `fig' on page 1 undefined on input line 20.\n";
         let d = parse(log, |_| false).diagnostics;
         assert_eq!(d.len(), 1);

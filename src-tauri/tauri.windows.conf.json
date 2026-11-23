@@ -1,0 +1,32 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "targets": ["nsis", "msi"],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "installerHooks": "windows/installer-hooks.nsh",
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico",
+        "languages": [
+          "English",
+          "German",
+          "French",
+          "Spanish",
+          "Italian",
+          "Portuguese",
+          "PortugueseBR",
+          "Dutch",
+          "Polish",
+          "Russian",
+          "SimpChinese",
+          "Japanese"
+        ],
+        "customLanguageFiles": {
+          "Polish": "windows/Polish.nsh"
+        },
+        "displayLanguageSelector": false
+      }
+    }
+  }
+}

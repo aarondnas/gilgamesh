@@ -29,6 +29,12 @@ pub async fn project_create_root(window: Window, parent: PathBuf, name: String) 
     Ok(root)
 }
 
+/// Where new projects go until the user picks a folder (see `files::default_location`).
+#[tauri::command]
+pub fn project_default_location() -> Option<PathBuf> {
+    files::default_location()
+}
+
 /// Outline, labels and bibliography entries for the outline view and completions.
 #[tauri::command]
 pub async fn project_scan(window: Window, root: PathBuf, main: Option<String>) -> CmdResult<ProjectScan> {

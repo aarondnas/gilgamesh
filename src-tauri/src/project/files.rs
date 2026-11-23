@@ -8,6 +8,7 @@ use std::path::{Component, Path, PathBuf};
 
 use serde::Serialize;
 
+use crate::util::folder_access::{create_dirs_error, create_error, write_error};
 use crate::util::i18n::localized;
 
 /// Upper bound for the tree, so accidentally opening e.g. the home folder
@@ -91,7 +92,7 @@ pub async fn read_bytes(root: &Path, relative: &str) -> Result<Vec<u8>, String> 
 
 pub async fn write(root: &Path, relative: &str, contents: &str) -> Result<(), String> {
     let path = resolve(root, relative)?;
-    tokio::fs::write(&path, contents).await.map_err(|e| format!("{relative}: {e}"))
+    tokio::fs::write(&path, contents).await.map_err(|e| write_error(&e, &path, relative))
 }
 
 /// Creates a new file; fails if it already exists.
@@ -99,8 +100,8 @@ pub async fn create_file(root: &Path, relative: &str, contents: &str) -> Result<
     use tokio::io::AsyncWriteExt;
     let path = resolve(root, relative)?;
     let mut file =
-        tokio::fs::OpenOptions::new().write(true).create_new(true).open(&path).await.map_err(|e| already_exists_or(e, relative))?;
-    file.write_all(contents.as_bytes()).await.map_err(|e| format!("{relative}: {e}"))
+        tokio::fs::OpenOptions::new().write(true).create_new(true).open(&path).await.map_err(|e| create_error(&e, &path, relative))?;
+    file.write_all(contents.as_bytes()).await.map_err(|e| write_error(&e, &path, relative))
 }
 
 /// Writes a file brought in from outside (dropped onto the explorer) as
@@ -110,7 +111,7 @@ pub async fn import(root: &Path, relative: &str, contents: &[u8]) -> Result<Stri
     use tokio::io::AsyncWriteExt;
     let path = resolve(root, relative)?;
     if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent).await.map_err(|e| format!("{relative}: {e}"))?;
+        tokio::fs::create_dir_all(parent).await.map_err(|e| create_dirs_error(&e, parent, relative))?;
     }
     let (dir, name) = relative.rsplit_once('/').map_or(("", relative), |(d, n)| (d, n));
     let (stem, extension) = match name.rfind('.') {
@@ -123,14 +124,15 @@ pub async fn import(root: &Path, relative: &str, contents: &[u8]) -> Result<Stri
             _ if dir.is_empty() => format!("{stem}-{n}{extension}"),
             _ => format!("{dir}/{stem}-{n}{extension}"),
         };
-        let opened = tokio::fs::OpenOptions::new().write(true).create_new(true).open(resolve(root, &candidate)?).await;
+        let target = resolve(root, &candidate)?;
+        let opened = tokio::fs::OpenOptions::new().write(true).create_new(true).open(&target).await;
         match opened {
             Ok(mut file) => {
-                file.write_all(contents).await.map_err(|e| format!("{candidate}: {e}"))?;
+                file.write_all(contents).await.map_err(|e| write_error(&e, &target, &candidate))?;
                 return Ok(candidate);
             }
             Err(e) if e.kind() == ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(format!("{candidate}: {e}")),
+            Err(e) => return Err(write_error(&e, &target, &candidate)),
         }
     }
     unreachable!()
@@ -138,15 +140,30 @@ pub async fn import(root: &Path, relative: &str, contents: &[u8]) -> Result<Stri
 
 pub async fn create_dir(root: &Path, relative: &str) -> Result<(), String> {
     let path = resolve(root, relative)?;
-    tokio::fs::create_dir(&path).await.map_err(|e| already_exists_or(e, relative))
+    tokio::fs::create_dir(&path).await.map_err(|e| create_error(&e, &path, relative))
 }
 
 /// Creates the folder `parent/name` for a new project; fails if it already exists.
+/// `parent` is made if need be: the default location (see [`default_location`]) is
+/// not there before the first project.
 pub async fn create_root(parent: &Path, name: &str) -> Result<PathBuf, String> {
     super::check_name(name)?;
+    tokio::fs::create_dir_all(parent).await.map_err(|e| create_dirs_error(&e, parent, parent.display()))?;
     let path = parent.join(name);
-    tokio::fs::create_dir(&path).await.map_err(|e| already_exists_or(e, name))?;
+    tokio::fs::create_dir(&path).await.map_err(|e| create_error(&e, &path, name))?;
     Ok(path)
+}
+
+/// Where new projects go until the user picks a folder. On Windows a folder of
+/// its own in the user's folder, as Visual Studio's `source\repos`: Documents
+/// and Desktop may be protected by Controlled Folder Access (see
+/// `util::folder_access`), which keeps unknown programs from writing there.
+pub fn default_location() -> Option<PathBuf> {
+    if cfg!(windows) {
+        dirs::home_dir().map(|home| home.join("Gilgamesh"))
+    } else {
+        dirs::document_dir().or_else(dirs::home_dir)
+    }
 }
 
 /// Unpacks a ZIP (e.g. an Overleaf download) into the new, empty folder `root`
@@ -177,15 +194,16 @@ pub fn extract_zip(archive: &Path, root: &Path) -> Result<usize, String> {
         let target = root.join(relative);
         let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
         if entry.is_dir() {
-            std::fs::create_dir_all(&target).map_err(|e| e.to_string())?;
+            std::fs::create_dir_all(&target).map_err(|e| create_dirs_error(&e, &target, relative.display()))?;
             continue;
         }
         if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            std::fs::create_dir_all(parent).map_err(|e| create_dirs_error(&e, parent, relative.display()))?;
         }
-        let mut out = std::fs::File::create(&target).map_err(|e| format!("{}: {e}", relative.display()))?;
+        let mut out = std::fs::File::create(&target).map_err(|e| write_error(&e, &target, relative.display()))?;
         // Counted as unpacked, not as the archive claims: its sizes may lie.
-        let written = std::io::copy(&mut (&mut entry).take(budget + 1), &mut out).map_err(|e| format!("{}: {e}", relative.display()))?;
+        let written =
+            std::io::copy(&mut (&mut entry).take(budget + 1), &mut out).map_err(|e| write_error(&e, &target, relative.display()))?;
         if written > budget {
             return Err(localized!("error_zip_too_large", size = MAX_ZIP_BYTES >> 30));
         }
@@ -227,9 +245,9 @@ pub async fn rename(root: &Path, from: &str, to: &str) -> Result<(), String> {
     // A case-only rename (`Main.tex` -> `main.tex`) finds itself on Windows.
     let same_file = source.to_string_lossy().to_lowercase() == target.to_string_lossy().to_lowercase();
     if target.exists() && !same_file {
-        return Err(format!("{to} existiert bereits"));
+        return Err(localized!("error_already_exists", name = to));
     }
-    tokio::fs::rename(&source, &target).await.map_err(|e| format!("{from}: {e}"))
+    tokio::fs::rename(&source, &target).await.map_err(|e| write_error(&e, &target, from))
 }
 
 /// Moves a file or folder to the system's recycle bin, so it can be restored.
@@ -240,14 +258,6 @@ pub async fn delete(root: &Path, relative: &str) -> Result<(), String> {
 
 pub fn exists(root: &Path, relative: &str) -> Result<bool, String> {
     Ok(resolve(root, relative)?.exists())
-}
-
-fn already_exists_or(e: std::io::Error, relative: &str) -> String {
-    if e.kind() == ErrorKind::AlreadyExists {
-        format!("{relative} existiert bereits")
-    } else {
-        format!("{relative}: {e}")
-    }
 }
 
 #[cfg(test)]
@@ -277,11 +287,25 @@ mod tests {
         let duplicate = create_root(&parent, "Thesis").await;
         let nested = create_root(&parent, "a/b").await;
         let escaping = create_root(&parent, "..").await;
+        // The default location is made with the first project.
+        let first = create_root(&parent.join("Gilgamesh"), "Thesis").await;
 
         assert_eq!(created.unwrap(), parent.join("Thesis"));
-        assert!(duplicate.unwrap_err().contains("existiert bereits"));
+        assert_eq!(duplicate.unwrap_err(), localized!("error_already_exists", name = "Thesis"));
         assert!(nested.is_err());
         assert!(escaping.is_err());
+        assert_eq!(first.unwrap(), parent.join("Gilgamesh").join("Thesis"));
+    }
+
+    #[test]
+    fn default_location_is_outside_protected_folders() {
+        let location = default_location().unwrap();
+        if cfg!(windows) {
+            assert_eq!(location, dirs::home_dir().unwrap().join("Gilgamesh"));
+            for protected in [dirs::document_dir(), dirs::desktop_dir()].into_iter().flatten() {
+                assert!(!location.starts_with(protected), "{}", location.display());
+            }
+        }
     }
 
     fn write_zip(path: &Path, entries: &[(&str, &str)]) {
@@ -343,7 +367,7 @@ mod tests {
         let case_only = rename(&root, "b.tex", "B.tex").await;
         let content = std::fs::read_to_string(root.join("chapters/a.tex"));
 
-        assert!(overwrite.unwrap_err().contains("existiert bereits"));
+        assert_eq!(overwrite.unwrap_err(), localized!("error_already_exists", name = "b.tex"));
         assert!(into_itself.is_err());
         assert!(moved.is_ok());
         assert!(case_only.is_ok());

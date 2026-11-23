@@ -1,5 +1,8 @@
 //! Package management through `tlmgr`.
 
+use std::path::PathBuf;
+use std::time::Duration;
+
 use serde::Serialize;
 use tauri::AppHandle;
 
@@ -27,14 +30,53 @@ pub async fn list(paths: &AppPaths, remote: bool) -> Result<Vec<Package>, String
     Ok(output.lines().filter_map(parse_info_line).collect())
 }
 
+/// Where `tlmgr`'s output goes: the app's log (`tex:log`), or nowhere (tests).
+#[derive(Clone, Copy)]
+pub enum Output<'a> {
+    App(&'a AppHandle),
+    /// Only the tests run tlmgr without the app.
+    #[cfg_attr(not(test), allow(dead_code))]
+    Quiet,
+}
+
 pub async fn install(app: &AppHandle, paths: &AppPaths, names: &[String]) -> Result<(), String> {
+    install_to(Output::App(app), paths, names).await
+}
+
+/// Installs `names`. `tlmgr` installs a package as the repository has it today,
+/// which may need today's versions of others (`latex-lab` those of the LaTeX
+/// kernel, say), while it never updates what is installed already: so that is
+/// brought up to date first, at most once a day (`UPDATE_EVERY`).
+pub async fn install_to(output: Output<'_>, paths: &AppPaths, names: &[String]) -> Result<(), String> {
     check_names(names)?;
-    run_mutating(app, paths, &["install"], names).await
+    if needs_update(paths) && run_mutating(output, paths, &["update", "--self", "--all"], &[]).await.is_ok() {
+        mark_updated(paths);
+    }
+    // Without the update (offline, a new TeX Live year) the install still gets its
+    // chance, and says itself what went wrong.
+    run_mutating(output, paths, &["install"], names).await
 }
 
 pub async fn remove(app: &AppHandle, paths: &AppPaths, names: &[String]) -> Result<(), String> {
     check_names(names)?;
-    run_mutating(app, paths, &["remove"], names).await
+    run_mutating(Output::App(app), paths, &["remove"], names).await
+}
+
+/// How long the distribution counts as up to date after updating everything.
+const UPDATE_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// Its time is when everything was last updated; in the distribution, so a new one starts without.
+fn update_marker(paths: &AppPaths) -> PathBuf {
+    paths.distribution().join(".gilgamesh-updated")
+}
+
+fn needs_update(paths: &AppPaths) -> bool {
+    let updated = std::fs::metadata(update_marker(paths)).and_then(|m| m.modified());
+    updated.map_or(true, |at| at.elapsed().map_or(true, |age| age >= UPDATE_EVERY))
+}
+
+fn mark_updated(paths: &AppPaths) {
+    let _ = std::fs::write(update_marker(paths), "");
 }
 
 /// Package names as TeX Live has them (`siunitx`, `babel-german`, `latex-bin.windows`).
@@ -52,7 +94,9 @@ fn check_names(names: &[String]) -> Result<(), String> {
 }
 
 pub async fn update_all(app: &AppHandle, paths: &AppPaths) -> Result<(), String> {
-    run_mutating(app, paths, &["update", "--self", "--all"], &[]).await
+    run_mutating(Output::App(app), paths, &["update", "--self", "--all"], &[]).await?;
+    mark_updated(paths);
+    Ok(())
 }
 
 /// Packages in the remote catalog that contain `file` (e.g. `siunitx.sty`).
@@ -95,11 +139,11 @@ fn parse_search(output: &str, file: &str) -> Vec<String> {
 
 /// Runs a changing `tlmgr` command. While the repository has a newer `tlmgr`,
 /// it refuses everything until it is updated itself: that happens first then.
-async fn run_mutating(app: &AppHandle, paths: &AppPaths, args: &[&str], names: &[String]) -> Result<(), String> {
-    match run_tlmgr(app, paths, args, names).await {
+async fn run_mutating(output: Output<'_>, paths: &AppPaths, args: &[&str], names: &[String]) -> Result<(), String> {
+    match run_tlmgr(output, paths, args, names).await {
         Err(error) if needs_self_update(&error) => {
-            run_tlmgr(app, paths, &["update", "--self"], &[]).await?;
-            run_tlmgr(app, paths, args, names).await
+            run_tlmgr(output, paths, &["update", "--self"], &[]).await?;
+            run_tlmgr(output, paths, args, names).await
         }
         result => result,
     }
@@ -110,10 +154,13 @@ fn needs_self_update(error: &str) -> bool {
     error.contains("tlmgr itself needs to be updated") || error.contains("update-tlmgr-latest")
 }
 
-async fn run_tlmgr(app: &AppHandle, paths: &AppPaths, args: &[&str], names: &[String]) -> Result<(), String> {
+async fn run_tlmgr(output: Output<'_>, paths: &AppPaths, args: &[&str], names: &[String]) -> Result<(), String> {
     let mut cmd = process::tlmgr_command(paths)?;
     cmd.args(args).args(names);
-    let result = process::run_streaming(app, cmd).await;
+    let result = match output {
+        Output::App(app) => process::run_streaming(app, cmd).await,
+        Output::Quiet => process::run_captured(cmd).await.map(drop),
+    };
     process::run_pending_tlmgr_updater(paths).await?;
     result
 }

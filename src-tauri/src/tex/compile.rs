@@ -787,9 +787,9 @@ mod tests {
                         installed.push(format!("{file}->?"));
                         continue;
                     }
-                    let mut cmd = process::tlmgr_command(&paths).unwrap();
-                    cmd.arg("install").args(&packages);
-                    if let Err(e) = process::run_captured(cmd).await {
+                    // The app's own installation, which also keeps tlmgr and the distribution up to date.
+                    use crate::tex::packages::{install_to, Output};
+                    if let Err(e) = install_to(Output::Quiet, &paths, &packages).await {
                         installed.push(format!("{file}->{} FAILED: {e}", packages.join(",")));
                         continue;
                     }

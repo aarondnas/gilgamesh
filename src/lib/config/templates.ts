@@ -559,10 +559,12 @@ function letter(lang: Lang): Template {
     files: {
       "main.tex": String.raw`\documentclass${t.classOptions ? `[${t.classOptions}]` : ""}{scrlttr2}
 \LoadLetterOption{${t.layout}}
+% The sender at the top right; after the letter option, so that cannot move it.
+\KOMAoptions{fromalign=right}
 ${lualatexLanguage(lang, true)}
 
-\setkomavar{fromname}{}
-\setkomavar{fromaddress}{}
+\setkomavar{fromname}{${t.fromName}}
+\setkomavar{fromaddress}{${t.fromAddress}}
 \setkomavar{subject}{${t.subject}}
 
 \begin{document}

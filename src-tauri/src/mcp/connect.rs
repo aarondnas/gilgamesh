@@ -68,8 +68,13 @@ pub enum DesktopConnection {
 /// What assistants start as `--mcp`: on Windows a copy of this program in
 /// Gilgamesh's data folder, not the program itself. A running bridge locks its
 /// exe for as long as the assistant runs; started from the install (or build)
-/// folder, it would block every update and `cargo build`.
+/// folder, it would block every update and `cargo build`. Run from an AppImage,
+/// the AppImage file: the program inside lives in a mount that is gone once the app ends.
 fn executable() -> Result<PathBuf, String> {
+    #[cfg(target_os = "linux")]
+    if let Some(appimage) = std::env::var_os("APPIMAGE").filter(|path| !path.is_empty()) {
+        return Ok(PathBuf::from(appimage));
+    }
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     #[cfg(all(windows, not(test)))]
     if let Some(dir) = dirs::data_local_dir().map(|d| d.join(APP_IDENTIFIER).join("mcp")) {
@@ -623,6 +628,16 @@ mod tests {
         assert!(!server.contains("__TOOLS__") && !server.contains("__APP_IDENTIFIER__"));
         assert!(server.contains(r#"const APP_IDENTIFIER = "com.aaron.gilgamesh";"#));
         assert!(zip.by_name("icon.png").is_ok());
+    }
+
+    /// Writes the Claude Desktop extension to `GILGAMESH_E2E_BUNDLE` for the end-to-end
+    /// tests (tests/e2e-linux), which run its server against the app: on Linux the app
+    /// connects Claude Desktop through its configuration and never writes one itself.
+    #[test]
+    #[ignore]
+    fn writes_extension_for_end_to_end_tests() {
+        let target = std::env::var_os("GILGAMESH_E2E_BUNDLE").expect("GILGAMESH_E2E_BUNDLE names the file to write");
+        write_bundle(Path::new(&target)).unwrap();
     }
 
     #[test]

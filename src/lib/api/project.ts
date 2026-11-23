@@ -67,6 +67,8 @@ export interface ProjectChanges {
 export const projectApi = {
   /** Creates `parent/name` and returns its path. */
   projectCreateRoot: (parent: string, name: string) => invoke<string>("project_create_root", { parent, name }),
+  /** Where new projects go until the user picks a folder; on Windows outside Documents and Desktop. */
+  projectDefaultLocation: () => invoke<string | null>("project_default_location"),
   /** Creates `parent/name` and unpacks the ZIP into it; returns the new root. */
   projectImportZip: (archive: string, parent: string, name: string) => invoke<string>("project_import_zip", { archive, parent, name }),
   projectTree: (root: string) => invoke<TreeEntry[]>("project_tree", { root }),

@@ -36,13 +36,26 @@ export function toCm(value: number, unit: Unit): number {
 const IMPERIAL_REGIONS = new Set(["US", "LR", "MM"]);
 
 /**
+ * The region of a language tag ("en" → "US", "de-AT" → "AT"); `null` for one
+ * Intl rejects, such as the "c" WebKitGTK reports under Linux's C locale.
+ */
+export function regionOf(tag: string): string | null {
+  try {
+    return new Intl.Locale(tag).maximize().region ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The unit for lengths. Without a choice of the user's it follows the
- * measurement system of Windows' region settings (metric: cm, US: inches),
- * as the language follows Windows' language; elsewhere the language's region.
+ * measurement system of the system's region settings (metric: cm, US: inches;
+ * on Linux the locale's), as the language follows the system's language;
+ * where it cannot be read, the language's region.
  */
 class UnitStore {
   /** Until the backend has answered: by the region of the browser language ("en-US"). */
-  system = $state<Unit>(IMPERIAL_REGIONS.has(new Intl.Locale(navigator.language).maximize().region ?? "") ? "in" : "cm");
+  system = $state<Unit>(IMPERIAL_REGIONS.has(regionOf(navigator.language) ?? "") ? "in" : "cm");
   /** The user's choice from the settings file, `null` to follow the system. */
   preference = $derived<Unit | null>(isUnit(settings.data.unit) ? settings.data.unit : null);
   current = $derived(this.preference ?? this.system);

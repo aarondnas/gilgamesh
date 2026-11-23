@@ -177,20 +177,32 @@ mod job {
 pub async fn kill_tree(child: &mut tokio::process::Child) {
     if let Some(pid) = child.id() {
         #[cfg(windows)]
-        let mut cmd = {
+        {
             let mut cmd = Command::new("taskkill");
             hide_console(cmd.args(["/PID", &pid.to_string(), "/T", "/F"]));
-            cmd
-        };
+            let _ = cmd.stdout(Stdio::null()).stderr(Stdio::null()).status().await;
+        }
+        // The process group latexmk leads (see `latexmk_command`), through the system call:
+        // the `kill` program of procps-ng 3.3.17 (Ubuntu 22.04) does not read `kill -KILL -<pid>`
+        // as that group and kills the user's other processes, this app among them.
         #[cfg(not(windows))]
-        let mut cmd = {
-            let mut cmd = Command::new("kill");
-            cmd.args(["-KILL", &format!("-{pid}")]);
-            cmd
-        };
-        let _ = cmd.stdout(Stdio::null()).stderr(Stdio::null()).status().await;
+        kill_group(pid);
     }
     let _ = child.kill().await;
+}
+
+/// Sends SIGKILL to the process group `group` leads; never to this app's own group.
+#[cfg(not(windows))]
+fn kill_group(group: u32) {
+    let Ok(group) = libc::pid_t::try_from(group) else { return };
+    // SAFETY: getpgrp has no preconditions.
+    let own = unsafe { libc::getpgrp() };
+    if group > 1 && group != own {
+        // SAFETY: only sends a signal to the processes of that group.
+        unsafe {
+            libc::killpg(group, libc::SIGKILL);
+        }
+    }
 }
 
 /// `tlmgr update --self` on Windows leaves an updater script behind that the
@@ -283,4 +295,37 @@ fn isolated_path(paths: &AppPaths) -> OsString {
         dirs.extend(std::env::split_paths(&system).filter(|dir| !dir.join(kpsewhich).is_file()));
     }
     std::env::join_paths(dirs).unwrap_or_default()
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    /// Whether `pid` is still running (not gone, not a zombie waiting to be reaped).
+    fn running(pid: &str) -> bool {
+        std::fs::read_to_string(format!("/proc/{pid}/stat"))
+            .is_ok_and(|stat| stat.rsplit_once(") ").is_some_and(|(_, rest)| !rest.starts_with('Z')))
+    }
+
+    /// Like a build: latexmk in a group of its own, the engine it started inside. Both end,
+    /// and only they: the test itself survives (procps' `kill -KILL -<pid>` killed it).
+    #[tokio::test]
+    async fn kill_tree_ends_the_build_and_nothing_else() {
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", "sleep 300 & echo $!; wait"]).process_group(0).stdout(Stdio::piped());
+        let mut child = cmd.spawn().unwrap();
+        let mut line = String::new();
+        BufReader::new(child.stdout.take().unwrap()).read_line(&mut line).await.unwrap();
+        let engine = line.trim().to_owned();
+        assert!(running(&engine));
+
+        kill_tree(&mut child).await;
+        for _ in 0..50 {
+            if !running(&engine) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(!running(&engine), "the engine outlived its build");
+    }
 }

@@ -55,7 +55,8 @@ jobs:
 
       - run: npm ci
 
-      # bundle.targets "all": NSIS + MSI on Windows, deb + rpm + AppImage on Linux
+      # tauri.windows.conf.json: NSIS + MSI; tauri.linux.conf.json: deb + rpm + AppImage
+      # (the CLI merges the file of the system it runs on into tauri.conf.json)
       - name: Build installers
         run: npm run tauri build
 

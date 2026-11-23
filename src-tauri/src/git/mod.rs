@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
+use crate::util::folder_access;
 use crate::util::i18n::localized;
 use crate::util::process::hide_console;
 
@@ -107,7 +108,7 @@ pub async fn clone(url: &str, parent: &Path, name: &str) -> Result<PathBuf, Stri
     }
     let target = parent.join(name);
     if target.exists() {
-        return Err(format!("{name} existiert bereits"));
+        return Err(localized!("error_already_exists", name = name));
     }
     let target_arg = target.to_string_lossy().into_owned();
     match run(&git, None, &["clone", "--", url, &target_arg]).await {
@@ -117,7 +118,7 @@ pub async fn clone(url: &str, parent: &Path, name: &str) -> Result<PathBuf, Stri
             if target.exists() && std::fs::read_dir(&target).is_ok_and(|mut d| d.next().is_none()) {
                 let _ = std::fs::remove_dir(&target);
             }
-            Err(e)
+            Err(if folder_access::blocked_git(&e, parent) { folder_access::protected(parent) } else { e })
         }
     }
 }
@@ -409,6 +410,9 @@ async fn run_raw(git: &Path, dir: Option<&Path>, args: &[&str]) -> Result<String
         return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
     }
     let stderr = String::from_utf8_lossy(&output.stderr);
+    if let Some(dir) = dir.filter(|dir| folder_access::blocked_git(&stderr, dir)) {
+        return Err(folder_access::protected(dir));
+    }
     let lines: Vec<&str> = stderr.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with("Cloning into")).collect();
     let message = lines[lines.len().saturating_sub(ERROR_LINES)..].join("\n");
     Err(if message.is_empty() { localized!("error_git_exit", code = output.status.code().unwrap_or(-1)) } else { message })
@@ -452,7 +456,7 @@ mod tests {
         assert_eq!(std::fs::canonicalize(&repository.path).ok(), std::fs::canonicalize(parent.join("hello")).ok());
         assert_eq!(repository.remote.as_deref(), Some("https://github.com/octocat/Hello-World.git"));
         assert!(repository.branch.is_some());
-        assert!(again.unwrap_err().contains("existiert bereits"));
+        assert_eq!(again.unwrap_err(), localized!("error_already_exists", name = "hello"));
         println!("Fehlermeldung: {}", missing.as_ref().unwrap_err());
         assert!(missing.is_err() && !left_behind);
     }

@@ -105,14 +105,40 @@ mod platform {
 
 #[cfg(not(windows))]
 mod platform {
-    /// Not yet on Linux (see the Windows version).
+    /// The fonts fontconfig knows, named as Windows registers them ("Family (TrueType)"),
+    /// so `families_of` reads both alike. Without fontconfig's `fc-list`, none.
     pub fn entries() -> Vec<String> {
-        Vec::new()
+        let output = std::process::Command::new("fc-list").args(["--format", "%{fontformat}\t%{family[0]}\n"]).output();
+        output.map(|output| parse(&String::from_utf8_lossy(&output.stdout))).unwrap_or_default()
+    }
+
+    /// `fc-list` lines "format<TAB>family"; only OpenType (CFF) and TrueType are of use to fontspec.
+    pub(super) fn parse(text: &str) -> Vec<String> {
+        text.lines()
+            .filter_map(|line| {
+                let (format, family) = line.split_once('\t')?;
+                let kind = match format {
+                    "TrueType" => "TrueType",
+                    "CFF" => "OpenType",
+                    _ => return None,
+                };
+                let family = family.trim();
+                (!family.is_empty()).then(|| format!("{family} ({kind})"))
+            })
+            .collect()
     }
 }
 
 #[cfg(test)]
 mod tests {
+    #[cfg(not(windows))]
+    #[test]
+    fn reads_fontconfigs_list() {
+        let entries = super::platform::parse("TrueType\tDejaVu Sans\nCFF\tNoto Serif CJK JP\nType 1\tNimbus Roman\nTrueType\t\n");
+        assert_eq!(entries, ["DejaVu Sans (TrueType)", "Noto Serif CJK JP (OpenType)"]);
+        assert_eq!(super::families_of(&entries[0]), ["DejaVu Sans"]);
+    }
+
     use super::families_of;
 
     #[test]

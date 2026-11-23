@@ -5,6 +5,7 @@
   import FileView from "$lib/components/window/FileView.svelte";
   import HistoryDialog from "$lib/components/dialogs/HistoryDialog.svelte";
   import ImportDialog from "$lib/components/project/ImportDialog.svelte";
+  import OpenRequestDialog from "$lib/components/project/OpenRequestDialog.svelte";
   import ImageDialog from "$lib/components/dialogs/ImageDialog.svelte";
   import TableDialog from "$lib/components/dialogs/TableDialog.svelte";
   import LinkDialog from "$lib/components/dialogs/LinkDialog.svelte";
@@ -65,6 +66,8 @@
   // Pinches reach the page (see `pinch.rs`); only the editor and the PDF preview zoom by them.
   onMount(() => refuseZoomIn(window));
   onMount(() => doc.listenForChanges());
+  // A file "opened with Gilgamesh" while the app runs (see `window::second_start`).
+  onMount(() => doc.listenForOpenRequests());
   onMount(() => updates.start());
 
   onMount(async () => {
@@ -166,6 +169,7 @@
 
 <ImportDialog />
 <GitProjectDialog />
+<OpenRequestDialog />
 <HistoryDialog />
 <ListDialog />
 <ImageDialog />

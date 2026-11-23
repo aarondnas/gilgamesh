@@ -78,7 +78,8 @@ jobs:
 
       - run: npm ci
 
-      # Builds with tauri.conf.json (bundle.targets "all") and uploads the installers to the draft.
+      # Builds with tauri.conf.json plus tauri.<system>.conf.json (the installer types) and uploads
+      # the installers to the draft.
       # tauri.updater.conf.json adds the updater artifacts: every installer signed with the private
       # key of the secrets, and latest.json, which installed copies read to find the new version
       # (src-tauri/src/updates.rs). Only here: CI and local builds need no key.

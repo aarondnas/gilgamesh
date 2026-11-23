@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { ProjectScan } from "$lib/api";
 import { sectionsChanged } from "./changes.svelte";
 import { localeName } from "./locale.svelte";
-import { fromCm, isUnit, toCm } from "./units.svelte";
+import { fromCm, isUnit, regionOf, toCm } from "./units.svelte";
 
 describe("units", () => {
   it("convert from and to cm, rounded to what is worth showing", () => {
@@ -13,6 +13,12 @@ describe("units", () => {
     expect(toCm(1, "in")).toBe(2.54);
     expect(isUnit("mm")).toBe(true);
     expect(isUnit("pt")).toBe(false);
+  });
+
+  it("read a language's region, and none from a tag such as Linux's C locale gives", () => {
+    expect(regionOf("en")).toBe("US");
+    expect(regionOf("de-AT")).toBe("AT");
+    expect(regionOf("c")).toBeNull();
   });
 });
 

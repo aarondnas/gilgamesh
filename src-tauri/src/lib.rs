@@ -22,6 +22,8 @@ use tauri::Manager;
 pub fn run() {
     suppress_crash_dialogs();
     tauri::Builder::default()
+        // First, as the plugin asks: a second start ends here and hands its arguments over.
+        .plugin(tauri_plugin_single_instance::init(|app, args, cwd| window::second_start(app, &args, std::path::Path::new(&cwd))))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -32,7 +34,10 @@ pub fn run() {
             app.manage(updates::Updates::new(app.package_info().version.to_string()));
             app.manage(project::watch::ProjectWatch::default());
             project::watch::ProjectWatch::start(app.handle());
-            window::create_main(app.handle())?;
+            // Started for a file ("Open with Gilgamesh"): its project instead of the last one.
+            let args: Vec<String> = std::env::args().collect();
+            let start = window::start_from_args(&args, &std::env::current_dir().unwrap_or_default());
+            window::create_main(app.handle(), start)?;
             // Without it the app works as before; assistants then report that Gilgamesh is unreachable.
             if let Err(e) = mcp::host::McpHost::start(app.handle()) {
                 eprintln!("MCP: {e}");
@@ -93,6 +98,7 @@ pub fn run() {
             commands::settings::settings_save,
             commands::settings::system_measurement,
             commands::project::project_create_root,
+            commands::project::project_default_location,
             commands::project::project_import_zip,
             commands::project::project_tree,
             commands::project::project_scan,
@@ -133,7 +139,9 @@ pub fn run() {
             commands::mcp::assistant_connect_code,
             commands::mcp::assistant_connect_codex,
             commands::print::print_printers,
+            commands::print::print_paper,
             commands::print::print_page,
+            commands::print::print_add_printer,
             commands::window::window_open_main,
             commands::window::project_claim,
             commands::update::update_status,

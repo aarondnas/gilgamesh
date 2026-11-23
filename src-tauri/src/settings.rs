@@ -85,10 +85,22 @@ pub fn system_measurement() -> Option<&'static str> {
     (len >= 1).then(|| if buffer[0] == u16::from(b'1') { "us" } else { "metric" })
 }
 
-/// Other systems have no such setting; the page goes by the language's region.
+/// The measurement system of the locale on Linux (`LC_MEASUREMENT`, as `locale` reports it):
+/// `"metric"` or `"us"`; `None` where it cannot be read. The page then goes by the language's region.
 #[cfg(not(windows))]
 pub fn system_measurement() -> Option<&'static str> {
-    None
+    let output = std::process::Command::new("locale").args(["-k", "LC_MEASUREMENT"]).output().ok()?;
+    measurement_of(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// `measurement=1` is metric, `measurement=2` US customary units.
+#[cfg(not(windows))]
+fn measurement_of(locale: &str) -> Option<&'static str> {
+    match locale.lines().find_map(|line| line.trim().strip_prefix("measurement="))?.trim() {
+        "1" => Some("metric"),
+        "2" => Some("us"),
+        _ => None,
+    }
 }
 
 /// When the app itself last wrote the file; any other change came from outside.
@@ -133,6 +145,13 @@ pub fn changed(app: &AppHandle, except: Option<&str>) {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(not(windows))]
+    #[test]
+    fn reads_the_locales_measurement_system() {
+        assert_eq!(super::measurement_of("measurement=1\n"), Some("metric"));
+        assert_eq!(super::measurement_of("measurement=2\n"), Some("us"));
+        assert_eq!(super::measurement_of(""), None);
+    }
 
     use super::*;
     use crate::util::fs::TestDir;

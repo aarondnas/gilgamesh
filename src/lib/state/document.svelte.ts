@@ -6,7 +6,17 @@
 
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask, message, open } from "@tauri-apps/plugin-dialog";
-import { api, errorMessage, events, type Engine, type PdfLocation, type ProjectScan, type WindowStart, type WordCount } from "$lib/api";
+import {
+  api,
+  errorMessage,
+  events,
+  type Engine,
+  type OpenRequest,
+  type PdfLocation,
+  type ProjectScan,
+  type WindowStart,
+  type WordCount,
+} from "$lib/api";
 import { extensionOf, fileKind, validateName, validateRename, VISIBLE_EXTENSIONS } from "$lib/config/project-files";
 import type { SpellSetting } from "$lib/config/spelling";
 import { template, type TemplateId } from "$lib/config/templates";
@@ -72,6 +82,8 @@ class DocumentStore {
   historyFor = $state<string | null>(null);
   /** ZIP being imported; the import dialog is shown while it is set. */
   importArchive = $state<string | null>(null);
+  /** A project the app was asked to open while this window shows another; the dialog asks where (`OpenRequestDialog`). */
+  openRequest = $state<OpenRequest | null>(null);
   /**
    * The dialog for a project in a Git repository: `"init"` makes a new one, `"clone"` clones one,
    * `"either"` offers both (the start page); `null` while closed.
@@ -177,9 +189,50 @@ class DocumentStore {
 
   /** What a new main window was opened for (see `windowOpenMain`). */
   async start(start: WindowStart) {
-    if (start.action === "open") await this.openProject(start.root);
+    if (start.action === "open") await this.#openWithFile(start.root, start.file ?? null);
     else if (start.action === "new") this.newProject();
     else this.#askImport(start.archive);
+  }
+
+  /** Opens `root` here and in it `file`, if given. */
+  async #openWithFile(root: string, file: string | null) {
+    await this.openProject(root);
+    if (file && project.root) {
+      this.leaveFile();
+      await this.openFile(file);
+    }
+  }
+
+  /**
+   * The app was asked to open a file while running ("Open with Gilgamesh"). In
+   * the window that shows its project, or one without a project, it just opens;
+   * a window with another project asks whether here or in a new window.
+   */
+  listenForOpenRequests(): () => void {
+    const listening = events.onOpenRequest((request) => {
+      if (request.shown) {
+        if (request.file) void this.#showRequestedFile(request.file);
+      } else if (!project.root) void this.#openWithFile(request.root, request.file);
+      else this.openRequest = request;
+    });
+    return () => void listening.then((stop) => stop());
+  }
+
+  async #showRequestedFile(file: string) {
+    this.leaveFile();
+    await this.openFile(file);
+  }
+
+  /** The answer of `OpenRequestDialog`: here, in a new window, or not at all (`null`). */
+  async answerOpenRequest(where: "here" | "window" | null) {
+    const request = this.openRequest;
+    this.openRequest = null;
+    if (!request || !where) return;
+    if (where === "here") await this.#openWithFile(request.root, request.file);
+    else
+      await api
+        .windowOpenMain({ action: "open", root: request.root, ...(request.file ? { file: request.file } : {}) })
+        .catch((err) => (this.error = errorMessage(err)));
   }
 
   /** Asks for a ZIP (e.g. an Overleaf download), then for name and location. */

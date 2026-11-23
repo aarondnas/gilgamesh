@@ -1,51 +1,10 @@
-//! Printing the PDF: the page lays the PDF's pages out for print (one sheet
-//! per printed page, several PDF pages on it if chosen; see `print.ts`),
-//! WebView2 sends that page to the printer with the options chosen on the
-//! "Print" page, without a dialog of its own.
+//! Printing on Windows: the printers Windows knows, and WebView2 printing the page.
 
-use serde::{Deserialize, Serialize};
+use super::{Duplex, PrintOptions, PrintStatus, Printer};
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Printer {
-    name: String,
-    is_default: bool,
-}
+/// Windows' "Printers & scanners", which also searches the network.
+pub const PRINTER_SETTINGS: &str = "ms-settings:printers";
 
-#[derive(Clone, Copy, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum Duplex {
-    OneSided,
-    LongEdge,
-    ShortEdge,
-}
-
-// Printing goes through WebView2: elsewhere only the stub below reads them.
-#[cfg_attr(not(windows), allow(dead_code))]
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PrintOptions {
-    /// `None` prints on the default printer.
-    printer: Option<String>,
-    copies: i32,
-    collate: bool,
-    duplex: Duplex,
-    grayscale: bool,
-    /// The page lays out its sheets itself, several PDF pages to one included.
-    landscape: bool,
-}
-
-/// How a print job ended; the page words it in the user's language.
-#[cfg_attr(not(windows), allow(dead_code))]
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum PrintStatus {
-    Succeeded,
-    PrinterUnavailable,
-    Failed,
-}
-
-#[cfg(windows)]
 pub fn printers() -> Result<Vec<Printer>, String> {
     use std::ptr::{null, null_mut};
     use windows_sys::Win32::Graphics::Printing::{
@@ -85,7 +44,6 @@ pub fn printers() -> Result<Vec<Printer>, String> {
 }
 
 /// Reads a NUL-terminated UTF-16 string.
-#[cfg(windows)]
 unsafe fn wide_to_string(ptr: *const u16) -> String {
     if ptr.is_null() {
         return String::new();
@@ -101,7 +59,6 @@ unsafe fn wide_to_string(ptr: *const u16) -> String {
 }
 
 /// Prints the calling page as it looks under `@media print`.
-#[cfg(windows)]
 pub async fn print(webview: tauri::Webview, options: PrintOptions) -> Result<PrintStatus, String> {
     use std::sync::{Arc, Mutex};
     use webview2_com::Microsoft::Web::WebView2::Win32::*;
@@ -181,14 +138,4 @@ pub async fn print(webview: tauri::Webview, options: PrintOptions) -> Result<Pri
         .map_err(|err| err.to_string())?;
 
     rx.await.map_err(|_| "print job lost".to_string())?
-}
-
-#[cfg(not(windows))]
-pub fn printers() -> Result<Vec<Printer>, String> {
-    Ok(Vec::new())
-}
-
-#[cfg(not(windows))]
-pub async fn print(_webview: tauri::Webview, _options: PrintOptions) -> Result<PrintStatus, String> {
-    Err("printing is only available on Windows".into())
 }

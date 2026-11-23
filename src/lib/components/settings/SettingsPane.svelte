@@ -19,6 +19,7 @@
   import type { ThemeSetting } from "$lib/state/settings.svelte";
   import { theme } from "$lib/state/theme.svelte";
   import { UNITS, units, type Unit } from "$lib/state/units.svelte";
+  import { SYSTEM_NAME } from "$lib/util/platform";
   import AboutSettings from "./AboutSettings.svelte";
   import DictionaryManager from "./DictionaryManager.svelte";
   import PackageManager from "./PackageManager.svelte";
@@ -37,7 +38,7 @@
   const themes: { value: ThemeSetting; label: string; icon: Component }[] = $derived([
     {
       value: "system",
-      label: m.theme_system({ mode: theme.system === "dark" ? m.theme_dark() : m.theme_light() }),
+      label: m.theme_system({ mode: theme.system === "dark" ? m.theme_dark() : m.theme_light(), system: SYSTEM_NAME }),
       icon: Monitor,
     },
     { value: "light", label: m.theme_light(), icon: Sun },
@@ -47,7 +48,7 @@
   const unitNames: Record<Unit, () => string> = { cm: m.unit_cm, mm: m.unit_mm, in: m.unit_in };
 
   const unitOptions: { value: Unit | null; label: string }[] = $derived([
-    { value: null, label: m.settings_units_system({ unit: unitNames[units.system]() }) },
+    { value: null, label: m.settings_units_system({ unit: unitNames[units.system](), system: SYSTEM_NAME }) },
     ...UNITS.map((u) => ({ value: u, label: unitNames[u]() })),
   ]);
 
@@ -104,7 +105,7 @@
           <SettingsPage>
             <section>
               <h1>{m.settings_units_title()}</h1>
-              <p>{m.settings_units_text()}</p>
+              <p>{m.settings_units_text({ system: SYSTEM_NAME })}</p>
 
               <div class="options" role="radiogroup">
                 {#each unitOptions as option (option.value ?? "system")}

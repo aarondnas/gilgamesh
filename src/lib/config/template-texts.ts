@@ -85,6 +85,10 @@ export interface LetterText {
   body: string;
   /** Lines separated by \\. */
   to: string;
+  /** The sender, in the letterhead at the top right and above the address window. */
+  fromName: string;
+  /** Lines separated by \\. */
+  fromAddress: string;
   subject: string;
 }
 
@@ -95,6 +99,8 @@ export const LETTER: Record<Lang, LetterText> = {
     closing: "Mit freundlichen Grüßen",
     body: "hier steht der Text des Briefes.",
     to: String.raw`Empfänger\\Straße 1\\12345 Ort`,
+    fromName: "Vorname Nachname",
+    fromAddress: String.raw`Weg 2\\12345 Ort`,
     subject: "Betreff",
   },
   en: {
@@ -104,6 +110,8 @@ export const LETTER: Record<Lang, LetterText> = {
     closing: "Yours faithfully,",
     body: "this is where the letter text goes.",
     to: String.raw`Recipient\\1 Street\\Town`,
+    fromName: "Your Name",
+    fromAddress: String.raw`2 Road\\Town`,
     subject: "Subject",
   },
   fr: {
@@ -112,6 +120,8 @@ export const LETTER: Record<Lang, LetterText> = {
     closing: "Veuillez agréer, Madame, Monsieur, l'expression de mes salutations distinguées.",
     body: "voici le texte de la lettre.",
     to: String.raw`Destinataire\\1 rue Exemple\\75000 Ville`,
+    fromName: "Prénom Nom",
+    fromAddress: String.raw`2 avenue Exemple\\75000 Ville`,
     subject: "Objet",
   },
   es: {
@@ -120,6 +130,8 @@ export const LETTER: Record<Lang, LetterText> = {
     closing: "Atentamente,",
     body: "Aquí va el texto de la carta.",
     to: String.raw`Destinatario\\Calle Ejemplo 1\\28000 Ciudad`,
+    fromName: "Nombre Apellido",
+    fromAddress: String.raw`Avenida Ejemplo 2\\28000 Ciudad`,
     subject: "Asunto",
   },
   it: {
@@ -128,6 +140,8 @@ export const LETTER: Record<Lang, LetterText> = {
     closing: "Distinti saluti",
     body: "qui va il testo della lettera.",
     to: String.raw`Destinatario\\Via Esempio 1\\00100 Città`,
+    fromName: "Nome Cognome",
+    fromAddress: String.raw`Piazza Esempio 2\\00100 Città`,
     subject: "Oggetto",
   },
   pt: {
@@ -136,6 +150,8 @@ export const LETTER: Record<Lang, LetterText> = {
     closing: "Com os melhores cumprimentos,",
     body: "aqui fica o texto da carta.",
     to: String.raw`Destinatário\\Rua Exemplo 1\\1000-001 Cidade`,
+    fromName: "Nome Apelido",
+    fromAddress: String.raw`Avenida Exemplo 2\\1000-001 Cidade`,
     subject: "Assunto",
   },
   nl: {
@@ -144,6 +160,8 @@ export const LETTER: Record<Lang, LetterText> = {
     closing: "Met vriendelijke groet,",
     body: "hier staat de tekst van de brief.",
     to: String.raw`Ontvanger\\Voorbeeldstraat 1\\1234 AB Plaats`,
+    fromName: "Voornaam Achternaam",
+    fromAddress: String.raw`Voorbeeldlaan 2\\1234 AB Plaats`,
     subject: "Onderwerp",
   },
   pl: {
@@ -152,6 +170,8 @@ export const LETTER: Record<Lang, LetterText> = {
     closing: "Z wyrazami szacunku",
     body: "tutaj znajduje się treść listu.",
     to: String.raw`Odbiorca\\ul. Przykładowa 1\\00-001 Miasto`,
+    fromName: "Imię Nazwisko",
+    fromAddress: String.raw`al. Przykładowa 2\\00-001 Miasto`,
     subject: "Temat",
   },
   ru: {
@@ -160,6 +180,8 @@ export const LETTER: Record<Lang, LetterText> = {
     closing: "С уважением,",
     body: "Здесь находится текст письма.",
     to: String.raw`Получатель\\ул. Примерная, д. 1\\123456 Город`,
+    fromName: "Имя Фамилия",
+    fromAddress: String.raw`пр. Примерный, д. 2\\123456 Город`,
     subject: "Тема",
   },
   zh: {
@@ -168,6 +190,8 @@ export const LETTER: Record<Lang, LetterText> = {
     closing: "此致敬礼",
     body: "这里是信件正文。",
     to: String.raw`收件人\\示例路 1 号\\100000 城市`,
+    fromName: "姓名",
+    fromAddress: String.raw`示例街 2 号\\100000 城市`,
     subject: "主题",
   },
   ja: {
@@ -176,6 +200,8 @@ export const LETTER: Record<Lang, LetterText> = {
     closing: "敬具",
     body: "こちらに手紙の本文を書きます。",
     to: String.raw`宛先\\例町 1-1\\100-0001 市`,
+    fromName: "氏名",
+    fromAddress: String.raw`例町 2-2\\100-0001 市`,
     subject: "件名",
   },
 };

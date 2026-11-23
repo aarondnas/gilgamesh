@@ -1,6 +1,6 @@
 <script lang="ts" module>
   import type { PDFDocumentProxy as LoadedPdf } from "pdfjs-dist";
-  import type { Printer as KnownPrinter } from "$lib/api";
+  import type { Paper as KnownPaper, Printer as KnownPrinter } from "$lib/api";
 
   /**
    * Kept while the page is closed, so opening it again shows at once: the
@@ -8,6 +8,8 @@
    * it, until a build brings another one.
    */
   let knownPrinters: KnownPrinter[] | null = null;
+  /** The paper to lay out sheets for, where the page has to (see `printPaper`); asked once. */
+  let paperSize: Promise<KnownPaper | null> | null = null;
   let loaded: { data: ArrayBuffer; pdf: LoadedPdf; aspect: number } | null = null;
 </script>
 
@@ -64,17 +66,22 @@
   });
   const busy = $derived(phase.kind !== "idle");
 
-  onMount(async () => {
-    const choose = (list: PrinterInfo[]) => {
-      printers = list;
-      if (!printer || !list.some((p) => p.name === printer)) {
-        printer = list.find((p) => p.isDefault)?.name ?? list[0]?.name ?? null;
-      }
-    };
-    if (knownPrinters) choose(knownPrinters);
-    // Asked anew in the background: printers come and go.
+  function choose(known: PrinterInfo[]) {
+    printers = known;
+    if (!printer || !printers.some((p) => p.name === printer)) {
+      printer = printers.find((p) => p.isDefault)?.name ?? printers[0]?.name ?? null;
+    }
+  }
+
+  /** Asks the system for its printers; they come and go. */
+  async function refreshPrinters() {
     knownPrinters = await api.printPrinters().catch(() => knownPrinters ?? []);
     choose(knownPrinters);
+  }
+
+  onMount(() => {
+    if (knownPrinters) choose(knownPrinters);
+    void refreshPrinters();
   });
 
   // The latest build: a new PDF replaces the preview, from the first page.
@@ -113,7 +120,9 @@
     try {
       phase = { kind: "preparing", done: 0, total: pages.length };
       const total = pages.length;
-      cleanup = await preparePrint(pdf, pages, pagesPerSide, layout, (done) => (phase = { kind: "preparing", done, total }));
+      paperSize ??= api.printPaper().catch(() => null);
+      const paper = await paperSize;
+      cleanup = await preparePrint(pdf, pages, pagesPerSide, layout, paper, (done) => (phase = { kind: "preparing", done, total }));
       phase = { kind: "printing" };
       const status = await api.printPage({
         printer: printerName,
@@ -136,6 +145,9 @@
     }
   }
 </script>
+
+<!-- Back from the system's printer settings: a printer added there shows up at once. -->
+<svelte:window onfocus={() => void refreshPrinters()} />
 
 <div class="print">
   <!-- A choice made lets go of the field, so the arrow keys turn the preview's pages again. -->
@@ -183,6 +195,16 @@
     {:else}
       <p class="hint">{m.print_no_printers()}</p>
     {/if}
+    <!-- The system's own settings, which also find printers on the network. -->
+    <Button
+      variant="link"
+      class="add-printer"
+      title={m.print_add_printer_title()}
+      disabled={busy}
+      onclick={() => void api.printAddPrinter().catch((err) => (result = { ok: false, text: errorMessage(err) }))}
+    >
+      {m.print_add_printer()}
+    </Button>
 
     <h2>{m.print_settings()}</h2>
     <select bind:value={pagesMode} disabled={busy}>
@@ -261,6 +283,11 @@
     padding: var(--space-8) var(--space-7) var(--space-7) var(--space-8);
     overflow-y: auto;
     box-sizing: border-box;
+  }
+
+  .settings :global(.add-printer) {
+    align-self: flex-start;
+    margin-top: calc(-1 * var(--space-2));
   }
 
   h1 {

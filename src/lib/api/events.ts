@@ -5,6 +5,7 @@ import { localize } from "./localize";
 import type { McpCall } from "./mcp";
 import type { ProjectChanges } from "./project";
 import type { InstallProgress } from "./tex";
+import type { OpenRequest } from "./window";
 
 /** Only the events sent to this window: a plain `listen` would also get the other windows'. */
 const onWindowEvent = <T>(event: string, cb: (payload: T) => void): Promise<UnlistenFn> =>
@@ -23,4 +24,6 @@ export const events = {
   onMcpCall: (cb: (call: McpCall) => void) => onWindowEvent("mcp-call", cb),
   /** An update is about to be installed: save everything, then answer with `updateSaved` (see `updates.rs`). */
   onUpdateSave: (cb: () => void) => onWindowEvent("update-save", cb),
+  /** The app was started again for a file while running, and this window is to show it (see `window::second_start`). */
+  onOpenRequest: (cb: (request: OpenRequest) => void) => onWindowEvent("open-request", cb),
 };

@@ -92,6 +92,31 @@ pub async fn install(app: &AppHandle, paths: &AppPaths, bundle: Bundle) -> Resul
         let _ = app.emit("tex:install-progress", Progress { phase, received, total });
     };
 
+    let release = unpack_release(paths, bundle, &emit).await?;
+
+    emit("essentials", 0, None);
+    let essentials: Vec<String> = ESSENTIAL_PACKAGES.iter().map(|&p| p.to_owned()).collect();
+    // Offline or a mirror hiccup must not fail the whole setup; on-demand
+    // installation catches up later.
+    if let Err(e) = packages::install(app, paths, &essentials).await {
+        let _ = app.emit("tex:log", localized!("log_essentials_incomplete", error = e));
+    }
+
+    let manifest = Manifest {
+        version: release.trim_start_matches('v').to_owned(),
+        bundle,
+        installed_at: SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs()),
+    };
+    let json = serde_json::to_vec_pretty(&manifest).map_err(|e| e.to_string())?;
+    tokio::fs::write(paths.manifest(), json).await.map_err(|e| e.to_string())?;
+    emit("done", 0, None);
+    Ok(manifest)
+}
+
+/// Downloads the latest release of `bundle` (the daily build if there is none),
+/// checks it against its published checksum, unpacks it as the distribution
+/// (replacing one there) and configures it. Returns the release's name.
+async fn unpack_release(paths: &AppPaths, bundle: Bundle, emit: &impl Fn(&'static str, u64, Option<u64>)) -> Result<String, String> {
     let (release, asset) = match release_asset(bundle, "latest").await {
         Ok(found) => found,
         Err(_) => release_asset(bundle, "tags/daily").await?,
@@ -119,24 +144,7 @@ pub async fn install(app: &AppHandle, paths: &AppPaths, bundle: Bundle) -> Resul
 
     emit("configure", 0, None);
     configure(paths).await?;
-
-    emit("essentials", 0, None);
-    let essentials: Vec<String> = ESSENTIAL_PACKAGES.iter().map(|&p| p.to_owned()).collect();
-    // Offline or a mirror hiccup must not fail the whole setup; on-demand
-    // installation catches up later.
-    if let Err(e) = packages::install(app, paths, &essentials).await {
-        let _ = app.emit("tex:log", localized!("log_essentials_incomplete", error = e));
-    }
-
-    let manifest = Manifest {
-        version: release.trim_start_matches('v').to_owned(),
-        bundle,
-        installed_at: SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs()),
-    };
-    let json = serde_json::to_vec_pretty(&manifest).map_err(|e| e.to_string())?;
-    tokio::fs::write(paths.manifest(), json).await.map_err(|e| e.to_string())?;
-    emit("done", 0, None);
-    Ok(manifest)
+    Ok(release)
 }
 
 /// Updates `tlmgr` and every package. TeX Live comes out once a year, and
@@ -325,6 +333,29 @@ async fn remove_dir_if_exists(dir: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Installs TinyTeX into an empty folder as the app does on first start, on
+    /// this system: download, checksum, unpacking, configuration and the
+    /// essential packages (bringing tlmgr and the rest up to date first). Needs the
+    /// network; `GILGAMESH_TEST_BASE` is the app's data folder to install into,
+    /// which `template_projects_compile` can then build in.
+    #[tokio::test]
+    #[ignore]
+    async fn installs_into_an_empty_folder() {
+        let base = std::env::var("GILGAMESH_TEST_BASE").expect("GILGAMESH_TEST_BASE");
+        let paths = AppPaths::from_base(base.into());
+        std::fs::create_dir_all(paths.tex_root()).unwrap();
+        let release = unpack_release(&paths, Bundle::Standard, &|_, _, _| {}).await.unwrap();
+        println!("release {release}");
+        for program in ["lualatex", "xelatex", "pdflatex", "kpsewhich"] {
+            assert!(process::executable(&paths, program).is_some(), "{program} missing");
+        }
+
+        // As the app does after unpacking (see `install`).
+        let essentials: Vec<String> = ESSENTIAL_PACKAGES.iter().map(|&p| p.to_owned()).collect();
+        packages::install_to(packages::Output::Quiet, &paths, &essentials).await.unwrap();
+        assert!(process::latexmk_command(&paths).is_some(), "latexmk missing");
+    }
 
     #[test]
     fn recognizes_a_new_tex_live_year() {

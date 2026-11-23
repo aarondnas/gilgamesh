@@ -1,9 +1,11 @@
 // Lays a PDF's pages out for print, one sheet per printed page with as many
-// PDF pages on it as chosen, shown only under `@media print`. WebView2 then
-// prints this page (see `print.rs`). Gilgamesh arranges the sheets itself:
-// WebView2 knows only 1, 2, 4, 6, 9 or 16 pages per sheet.
+// PDF pages on it as chosen, shown only under `@media print`. The system's
+// webview then prints this page (WebView2 on Windows, WebKitGTK on Linux; see
+// `print/`). Gilgamesh arranges the sheets itself: print systems know only
+// 1, 2, 4, 6, 9 or 16 pages per sheet.
 import * as pdfjs from "pdfjs-dist";
 import type { PDFDocumentProxy } from "pdfjs-dist";
+import type { Paper } from "$lib/api";
 import "./renderer"; // sets up the pdf.js worker
 import { CELL_GAP, SHEET_PADDING, type SheetLayout } from "./sheets";
 
@@ -11,7 +13,12 @@ import { CELL_GAP, SHEET_PADDING, type SheetLayout } from "./sheets";
 const PRINT_DPI = 300;
 const POINTS_PER_INCH = 72;
 
-const PRINT_STYLE = `
+/**
+ * Each sheet is exactly one printed page: the viewport where that is the page
+ * (WebView2), otherwise the paper's size (WebKitGTK takes `vw` and `vh` from
+ * the window, also when printing).
+ */
+const printStyle = (width: string, height: string) => `
 @media screen {
   .print-sheets { display: none; }
 }
@@ -26,8 +33,8 @@ const PRINT_STYLE = `
   body > :not(.print-sheets) { display: none !important; }
   .print-sheets .sheet {
     display: grid;
-    width: 100vw;
-    height: 100vh;
+    width: ${width};
+    height: ${height};
     box-sizing: border-box;
     overflow: hidden;
     break-after: page;
@@ -51,7 +58,8 @@ export async function pageAspectOf(pdf: PDFDocumentProxy): Promise<number> {
 
 /**
  * Renders `pages` at print resolution into the print layout of this document,
- * `pagesPerSide` to a sheet arranged as `layout`. Returns a function that
+ * `pagesPerSide` to a sheet arranged as `layout`, for `paper` if the page has
+ * to size the sheets itself (see `printPaper`). Returns a function that
  * removes it again; call it once the job is spooled.
  */
 export async function preparePrint(
@@ -59,10 +67,19 @@ export async function preparePrint(
   pages: number[],
   pagesPerSide: number,
   layout: SheetLayout,
+  paper: Paper | null,
   onProgress: (done: number) => void,
 ): Promise<() => void> {
   const style = document.createElement("style");
-  style.textContent = PRINT_STYLE;
+  if (paper) {
+    // Landscape sheets lie across the paper.
+    const [width, height] = layout.landscape ? [paper.height, paper.width] : [paper.width, paper.height];
+    // A pixel less than the paper: WebKitGTK rounds the printed page down to whole
+    // pixels, and a sheet a fraction higher would spill onto a blank page of its own.
+    style.textContent = printStyle(`${width}mm`, `calc(${height}mm - 1px)`);
+  } else {
+    style.textContent = printStyle("100vw", "100vh");
+  }
   const sheets = document.createElement("div");
   sheets.className = "print-sheets";
   const urls: string[] = [];

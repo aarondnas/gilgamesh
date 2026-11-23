@@ -7,9 +7,9 @@
 </script>
 
 <script lang="ts">
-  import { documentDir } from "@tauri-apps/api/path";
   import { open } from "@tauri-apps/plugin-dialog";
   import { onMount } from "svelte";
+  import { api } from "$lib/api";
   import { m } from "$lib/paraglide/messages";
   import { settings } from "$lib/state/settings.svelte";
   import Button from "../ui/Button.svelte";
@@ -27,7 +27,7 @@
   const preview = $derived(targetPath(location, name));
 
   onMount(async () => {
-    location ||= settings.data.projectLocation ?? (await documentDir().catch(() => ""));
+    location ||= settings.data.projectLocation ?? ((await api.projectDefaultLocation().catch(() => null)) || "");
   });
 
   async function chooseLocation() {

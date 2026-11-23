@@ -12,13 +12,13 @@
 //! why the main windows are built here instead of from `tauri.conf.json`.
 
 use std::collections::{HashMap, HashSet};
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 use tauri::webview::{NewWindowFeatures, NewWindowResponse};
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 use crate::project::project_key;
 use crate::project::watch::ProjectWatch;
@@ -31,11 +31,15 @@ pub mod taskbar_icon;
 pub const MAIN: &str = "main";
 
 /// What a new main window does first; the page reads it as `window.__GILGAMESH_START__`.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "action", rename_all = "camelCase")]
 pub enum Start {
-    /// Opens this project folder.
-    Open { root: String },
+    /// Opens this project folder, and in it `file` (relative, with `/`) if given.
+    Open {
+        root: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        file: Option<String>,
+    },
     /// Shows the dialog for a new project.
     New,
     /// Shows the dialog for importing this ZIP archive.
@@ -64,17 +68,18 @@ fn owner(label: &str) -> &str {
 }
 
 /// Builds the first main window from its entry in `tauri.conf.json` (marked `"create": false`).
-pub fn create_main(app: &AppHandle) -> tauri::Result<()> {
+/// Without `start` it reopens the last project.
+pub fn create_main(app: &AppHandle, start: Option<Start>) -> tauri::Result<()> {
     app.manage(MainWindows::default());
-    build_main(app, MAIN, None)
+    build_main(app, MAIN, start)
 }
 
 /// Opens another main window. A project already shown in a window is not
-/// opened twice: that window comes to the front instead.
+/// opened twice: that window comes to the front instead (and shows the file).
 pub fn open_main(app: &AppHandle, start: Option<Start>) -> Result<(), String> {
-    if let Some(Start::Open { root }) = &start {
+    if let Some(Start::Open { root, file }) = &start {
         if let Some(owner) = project_owner(app, root) {
-            focus(app, &owner);
+            send_open(app, &owner, root, file.clone(), true);
             return Ok(());
         }
     }
@@ -85,6 +90,8 @@ pub fn open_main(app: &AppHandle, start: Option<Start>) -> Result<(), String> {
 fn build_main(app: &AppHandle, label: &str, start: Option<Start>) -> tauri::Result<()> {
     let mut config = app.config().app.windows.iter().find(|w| w.label == MAIN).cloned().unwrap_or_default();
     config.label = label.to_owned();
+    // Shown once it fits on its screen (see `fit_to_screen`), so it does not jump.
+    config.visible = false;
     let start = serde_json::to_string(&start).unwrap_or_else(|_| "null".into());
     let handle = app.clone();
     let owner = label.to_owned();
@@ -92,10 +99,78 @@ fn build_main(app: &AppHandle, label: &str, start: Option<Start>) -> tauri::Resu
         .initialization_script(format!("window.__GILGAMESH_START__ = {start};"))
         .on_new_window(move |url, features| open_detached(&handle, &owner, &url, features))
         .build()?;
+    if let Err(e) = fit_to_screen(&window, &config) {
+        eprintln!("window could not be fitted to the screen: {e}");
+    }
+    window.show()?;
     taskbar_icon::apply(&window);
     pinch::enable(&window);
     context_menu::trim(&window);
     Ok(())
+}
+
+/// The configured size (1280×800) is larger than many screens leave free: a
+/// 1366×768 laptop, or a larger one scaled to 150 % or more. There the window
+/// would reach under the taskbar and hide the status bar, so it is made as large
+/// as the work area allows and centred in it; below the minimum size it is maximized.
+fn fit_to_screen(window: &tauri::WebviewWindow, config: &tauri::utils::config::WindowConfig) -> tauri::Result<()> {
+    let Some(monitor) = window.current_monitor()?.or(window.primary_monitor()?) else { return Ok(()) };
+    let area = monitor.work_area();
+    let scale = monitor.scale_factor();
+    let min = ((config.min_width.unwrap_or(0.0) * scale).ceil() as u32, (config.min_height.unwrap_or(0.0) * scale).ceil() as u32);
+    let position = window.outer_position()?;
+    let size = window.outer_size()?;
+    let area = Rect { x: area.position.x, y: area.position.y, width: area.size.width, height: area.size.height };
+    match placement(Rect { x: position.x, y: position.y, width: size.width, height: size.height }, min, area) {
+        Placement::Keep => {}
+        Placement::Maximize => window.maximize()?,
+        Placement::Move(r) => {
+            window.set_size(tauri::PhysicalSize::new(r.width, r.height))?;
+            window.set_position(tauri::PhysicalPosition::new(r.x, r.y))?;
+        }
+    }
+    Ok(())
+}
+
+/// A rectangle in physical pixels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Rect {
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+}
+
+impl Rect {
+    fn contains(&self, other: &Rect) -> bool {
+        let end = |start: i32, length: u32| i64::from(start) + i64::from(length);
+        other.x >= self.x
+            && other.y >= self.y
+            && end(other.x, other.width) <= end(self.x, self.width)
+            && end(other.y, other.height) <= end(self.y, self.height)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Placement {
+    /// It lies inside the work area.
+    Keep,
+    /// Even the minimum size does not fit.
+    Maximize,
+    Move(Rect),
+}
+
+/// Where `window` (with `min` as its smallest size) goes to lie inside the work area `area`.
+fn placement(window: Rect, min: (u32, u32), area: Rect) -> Placement {
+    if area.contains(&window) {
+        return Placement::Keep;
+    }
+    if min.0 > area.width || min.1 > area.height {
+        return Placement::Maximize;
+    }
+    let (width, height) = (window.width.min(area.width), window.height.min(area.height));
+    let centred = |start: i32, free: u32, length: u32| start + ((free - length) / 2) as i32;
+    Placement::Move(Rect { x: centred(area.x, area.width, width), y: centred(area.y, area.height, height), width, height })
 }
 
 fn focus(app: &AppHandle, label: &str) {
@@ -103,6 +178,74 @@ fn focus(app: &AppHandle, label: &str) {
         let _ = window.unminimize();
         let _ = window.set_focus();
     }
+}
+
+/// The file that marks a project's folder (see `project.svelte.ts`).
+const PROJECT_FILE: &str = "gilgamesh.json";
+/// Asks a main window to open a project and file (see [`OpenRequest`]).
+const OPEN_EVENT: &str = "open-request";
+
+/// A project and file the app was asked to open while running, for the window
+/// that is to show it; the page opens it, or asks where to (`OpenRequestDialog.svelte`).
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenRequest {
+    pub root: String,
+    /// Relative to `root`, with `/`.
+    pub file: Option<String>,
+    /// The window already shows `root`: only the file is opened, nothing asked.
+    pub shown: bool,
+}
+
+/// What the program was started for: a file named on the command line, as Windows
+/// passes it for "Open with Gilgamesh", opened in its project (see [`project_of`]).
+pub fn start_from_args(args: &[String], cwd: &Path) -> Option<Start> {
+    let file = args.iter().skip(1).filter(|arg| !arg.starts_with("--")).map(|arg| cwd.join(arg)).find(|path| path.is_file())?;
+    let (root, file) = project_of(&file)?;
+    Some(Start::Open { root: root.to_string_lossy().into_owned(), file: Some(file) })
+}
+
+/// The project `file` belongs to and its path in it: the nearest folder above it
+/// with a `gilgamesh.json` (`chapters/intro.tex` opens the whole thesis), else its own folder.
+pub fn project_of(file: &Path) -> Option<(PathBuf, String)> {
+    let folder = file.parent()?;
+    let root = folder.ancestors().find(|dir| dir.join(PROJECT_FILE).is_file()).unwrap_or(folder);
+    let relative = file.strip_prefix(root).ok()?;
+    let relative: Vec<String> = relative.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+    Some((root.to_path_buf(), relative.join("/")))
+}
+
+/// The program was started again while running (see the single-instance plugin in
+/// `lib.rs`). With a file it goes to the window showing its project, else to the
+/// window used last, whose page asks whether to open it there or in a new window;
+/// without one, a new main window opens, as a second start always did.
+pub fn second_start(app: &AppHandle, args: &[String], cwd: &Path) {
+    let app = app.clone();
+    let start = start_from_args(args, cwd);
+    // Building a window on the main thread, where this is called, deadlocks WebView2 (see `window_open_main`).
+    tauri::async_runtime::spawn(async move {
+        let opened = match start {
+            Some(Start::Open { root, file }) => {
+                match project_owner(&app, &root).map(|owner| (owner, true)).or_else(|| active_main(&app).map(|label| (label, false))) {
+                    Some((label, shown)) => {
+                        send_open(&app, &label, &root, file, shown);
+                        Ok(())
+                    }
+                    None => open_main(&app, Some(Start::Open { root, file })),
+                }
+            }
+            _ => open_main(&app, None),
+        };
+        if let Err(e) = opened {
+            eprintln!("second start: {e}");
+        }
+    });
+}
+
+/// Brings the main window `label` to the front and asks its page to open `root` (and `file`).
+fn send_open(app: &AppHandle, label: &str, root: &str, file: Option<String>, shown: bool) {
+    focus(app, label);
+    let _ = app.emit_to(label, OPEN_EVENT, OpenRequest { root: root.to_owned(), file, shown });
 }
 
 /// Remembers the window in front, for assistants (see `active_main`).
@@ -247,6 +390,49 @@ mod tests {
     fn tells_odd_window_positions() {
         assert!(sane_coordinate(-6.5) && sane_coordinate(3840.0) && sane_coordinate(-1920.0));
         assert!(!sane_coordinate(f64::from(i32::MAX)) && !sane_coordinate(f64::NAN) && !sane_coordinate(f64::INFINITY));
+    }
+
+    #[test]
+    fn opens_a_file_in_its_project() {
+        let dir = crate::util::fs::TestDir::new("open-with");
+        let thesis = dir.join("Thesis");
+        std::fs::create_dir_all(thesis.join("chapters")).unwrap();
+        std::fs::write(thesis.join(PROJECT_FILE), "{}").unwrap();
+        std::fs::write(thesis.join("main.tex"), "").unwrap();
+        std::fs::write(thesis.join("chapters").join("intro.tex"), "").unwrap();
+        std::fs::write(dir.join("loose.tex"), "").unwrap();
+        let arg = |path: &Path| path.to_string_lossy().into_owned();
+        let open = |root: &Path, file: &str| Some(Start::Open { root: arg(root), file: Some(file.to_owned()) });
+
+        // A file in a subfolder opens the whole project.
+        let intro = vec!["gilgamesh.exe".to_owned(), arg(&thesis.join("chapters").join("intro.tex"))];
+        assert_eq!(start_from_args(&intro, &dir), open(&thesis, "chapters/intro.tex"));
+        // Relative to the folder the program was started in; options are skipped.
+        let relative = vec!["gilgamesh.exe".to_owned(), "--flag".to_owned(), "Thesis/main.tex".to_owned()];
+        assert_eq!(start_from_args(&relative, &dir), open(&thesis, "main.tex"));
+        // Without gilgamesh.json above it, its own folder is the project.
+        assert_eq!(start_from_args(&["gilgamesh.exe".to_owned(), arg(&dir.join("loose.tex"))], &dir), open(&dir, "loose.tex"));
+        // No file: no start of its own (the last project comes back).
+        assert_eq!(start_from_args(&["gilgamesh.exe".to_owned()], &dir), None);
+        assert_eq!(start_from_args(&["gilgamesh.exe".to_owned(), arg(&dir.join("missing.tex"))], &dir), None);
+        assert_eq!(start_from_args(&["gilgamesh.exe".to_owned(), arg(&thesis)], &dir), None);
+    }
+
+    #[test]
+    fn fits_new_windows_into_the_work_area() {
+        let rect = |x, y, width, height| Rect { x, y, width, height };
+        // 1366×768 at 100 %, taskbar 48 px: 1280×800 is too high; it keeps its width, centred.
+        let laptop = rect(0, 0, 1366, 720);
+        assert_eq!(placement(rect(26, 26, 1280, 800), (800, 500), laptop), Placement::Move(rect(43, 0, 1280, 720)));
+        // Fits as it is.
+        let large = rect(0, 0, 2560, 1392);
+        assert_eq!(placement(rect(100, 80, 1280, 800), (800, 500), large), Placement::Keep);
+        // Fits in size, but Windows put it partly off the area: moved inside.
+        assert_eq!(placement(rect(1800, 900, 1280, 800), (800, 500), large), Placement::Move(rect(640, 296, 1280, 800)));
+        // A second screen left of the first (negative coordinates).
+        assert_eq!(placement(rect(-1500, 40, 1280, 800), (800, 500), rect(-1920, 0, 1920, 1040)), Placement::Keep);
+        // Smaller than the minimum size: maximized instead.
+        assert_eq!(placement(rect(0, 0, 1280, 800), (800, 500), rect(0, 0, 1024, 480)), Placement::Maximize);
     }
 
     #[test]
