@@ -206,15 +206,20 @@ fn with_undefined_command(message: &str, after: &[&str]) -> String {
     }
 }
 
-/// babel's fallback when a language's patterns are not installed: it warns
-/// "No hyphenation patterns were preloaded …" and then hyphenates with
-/// English rules, which silently changes line and page breaks.
-/// Language files with their own fallback (Polish) report it as
+/// babel's fallback when a language's patterns are not installed: the language
+/// file warns with the language's display name ("No hyphenation patterns were
+/// preloaded for\n(babel)   the language 'Polish' into the format.") and then
+/// hyphenates with other rules, which silently changes line and page breaks.
+/// The name may carry details: 'German (current orthography), needed by …'.
+/// ("Hyphen rules for 'canadian' set to \l@english" is no sign of it: babel
+/// writes that for every intended alias too.)
+static HYPHEN_FALLBACK: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"No hyphenation patterns were preloaded for\s*(?:\(babel\)\s*)?the language '([^'(,]+)").unwrap());
+
+/// LuaTeX's additional report by babel's name of the language:
 /// "No hyphenation patterns were set for\n(babel)   language 'polish'".
-static HYPHEN_FALLBACK: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"Package babel Info: (?:Hyphen rules for '([^']+)' set to \\l@|No hyphenation patterns were set for\s*\(babel\)\s*language '([^']+)')")
-        .unwrap()
-});
+static HYPHEN_FALLBACK_LUA: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"No hyphenation patterns were set for\s*(?:\(babel\)\s*)?language '([^']+)'").unwrap());
 
 /// glossaries names its missing translation, spread over two log lines:
 /// "Please check on CTAN for a bundle called\n(glossaries)   `glossaries-german' or similar."
@@ -231,11 +236,11 @@ fn missing_language_modules(log: &str) -> Vec<String> {
     packages
 }
 
-/// babel language names whose patterns ship in a differently named package.
-/// All others are in `hyphen-<name>`.
+/// Language names (babel's, or display names lowercased without spaces) whose
+/// patterns ship in a differently named package. All others are in `hyphen-<name>`.
 const HYPHEN_ALIASES: &[(&[&str], &str)] = &[
-    (&["ngerman", "austrian", "naustrian", "swissgerman", "nswissgerman"], "german"),
-    (&["british", "american", "UKenglish", "USenglish", "canadian", "australian", "newzealand"], "english"),
+    (&["ngerman", "austrian", "naustrian", "swissgerman", "nswissgerman", "swissstandardgerman"], "german"),
+    (&["british", "american", "ukenglish", "usenglish", "canadian", "australian", "newzealand"], "english"),
     (&["francais", "acadian", "canadien"], "french"),
     (&["brazil", "brazilian", "portuges"], "portuguese"),
     (&["norsk", "nynorsk", "bokmal"], "norwegian"),
@@ -252,8 +257,12 @@ fn missing_hyphenation(log: &str) -> Vec<String> {
         return Vec::new();
     }
     let mut packages: Vec<String> = Vec::new();
-    for c in HYPHEN_FALLBACK.captures_iter(log) {
-        let Some(language) = c.get(1).or(c.get(2)).map(|m| m.as_str()) else { continue };
+    let names = HYPHEN_FALLBACK.captures_iter(log).chain(HYPHEN_FALLBACK_LUA.captures_iter(log));
+    for c in names {
+        // 'Swiss Standard German (1901 orthography) and …' → swissstandardgerman
+        let name = c[1].split(" and ").next().unwrap_or_default();
+        let language: String = name.split_whitespace().collect::<String>().to_lowercase();
+        let language = language.as_str();
         let base = HYPHEN_ALIASES.iter().find(|(names, _)| names.contains(&language)).map_or(language, |(_, base)| base);
         let package = format!("hyphen-{base}");
         if !packages.contains(&package) {
@@ -540,20 +549,42 @@ LaTeX Warning: There were undefined references.
 
     #[test]
     fn detects_missing_hyphenation_patterns() {
-        let log = "Package babel Warning: No hyphenation patterns were preloaded for\n\
-                   (babel)                the language 'German (current orthography)' into the format.\n\
-                   Package babel Info: Hyphen rules for 'ngerman' set to \\l@english\n\
-                   Package babel Info: Hyphen rules for 'french' set to \\l@english\n";
-        assert_eq!(parse(log, |_| false).missing_files, ["hyphen-german", "hyphen-french"]);
+        // English's own aliases come first in every document that loads it and are no fallback.
+        let english = "Package babel Info: Hyphen rules for 'canadian' set to \\l@english\n\
+                       (babel)             (\\language0). Reported on input line 102.\n\
+                       Package babel Info: Hyphen rules for 'australian' set to \\l@ukenglish\n\
+                       (babel)             (\\language23). Reported on input line 103.\n";
+        let log = format!(
+            "{english}Package babel Warning: No hyphenation patterns were preloaded for\n\
+             (babel)                the language 'German (current orthography), needed by Austrian (current orthography)' into the format.\n\
+             Package babel Info: Hyphen rules for 'ngerman' set to \\l@english\n\
+             Package babel Warning: No hyphenation patterns were preloaded for\n\
+             (babel)                the language 'French' into the format.\n\
+             Package babel Info: Hyphen rules for 'french' set to \\l@english\n"
+        );
+        assert_eq!(parse(&log, |_| false).missing_files, ["hyphen-german", "hyphen-french"]);
 
-        let polish = "Package babel Warning: No hyphenation patterns were preloaded for\n\
-                      (babel)                the language 'Polish' into the format.\n\
-                      Package babel Info: No hyphenation patterns were set for\n\
-                      (babel)             language 'polish'. Reported on input line 116.\n";
-        assert_eq!(parse(polish, |_| false).missing_files, ["hyphen-polish"]);
+        // Polish falls back to \l@unhyphenated without a "Hyphen rules" line (TeX Live 2026).
+        let polish = format!(
+            "{english}Package babel Warning: No hyphenation patterns were preloaded for\n\
+             (babel)                the language 'Polish' into the format.\n\
+             (babel)                Please, configure your TeX system to add them and\n\
+             (babel)                rebuild the format. Now I will use the patterns\n\
+             (babel)                preloaded for \\language=0 instead on input line 40.\n"
+        );
+        assert_eq!(parse(&polish, |_| false).missing_files, ["hyphen-polish"]);
+
+        // LuaTeX also names it by babel's name: still one package.
+        let lua = format!("{polish}Package babel Info: No hyphenation patterns were set for\n(babel)             language 'polish'. Reported on input line 116.\n");
+        assert_eq!(parse(&lua, |_| false).missing_files, ["hyphen-polish"]);
+
+        let swiss = "Package babel Warning: No hyphenation patterns were preloaded for\n\
+                     (babel)                the language 'Swiss Standard German (1901 orthography) and German (1901 orthography)' into the format.\n";
+        assert_eq!(parse(swiss, |_| false).missing_files, ["hyphen-german"]);
 
         // Without the warning the mapping is intentional, e.g. \babelprovide with hyphenrules.
         assert!(parse("Package babel Info: Hyphen rules for 'ngerman' set to \\l@english\n", |_| false).missing_files.is_empty());
+        assert!(parse(english, |_| false).missing_files.is_empty());
     }
 
     #[test]

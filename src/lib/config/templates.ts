@@ -230,7 +230,7 @@ ${thesisLanguage(lang)}
 \renewcommand{\arraystretch}{1.2}
 
 \usepackage[backend=biber, style=numeric, sorting=none]{biblatex}
-\addbibresource{${p.bib}.bib}${bibStrings}
+\addbibresource{${p.extra}/${p.bib}.bib}${bibStrings}
 \usepackage{csquotes}
 \DeclareNameAlias{author}{family-given}
 \DeclareFieldFormat{labelnumberwidth}{\mkbibbrackets{#1}}
@@ -503,7 +503,7 @@ ${t.acronym}
 `,
       [`${p.extra}/${p.appendix}.tex`]: t.appendix,
       [`${p.extra}/${p.declaration}.tex`]: t.declaration,
-      [`${p.bib}.bib`]: `@book{knuth1984,
+      [`${p.extra}/${p.bib}.bib`]: `@book{knuth1984,
   author    = {Donald E. Knuth},
   title     = {The {\\TeX}book},
   publisher = {Addison-Wesley},
